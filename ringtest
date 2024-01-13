@@ -1,0 +1,550 @@
+/**
+
+ * Activities module
+
+ */
+
+angular
+
+  .module("doorbot-admin.release-notes", ["ui.router", "common.alert", "ngResource"])
+
+
+
+  .config(function config($stateProvider) {
+
+    $stateProvider.state("release_notes", {
+
+      url: "/release_notes_manager",
+
+      resolve: {
+
+        User: "$currentUser",
+
+        baseRole: function() {
+
+          return "lead";
+
+        }
+
+      },
+
+      views: {
+
+        main: {
+
+          controller: "ReleaseNotesCtrl",
+
+          templateUrl: "../../templates/release_notes.tpl.html",
+
+          resolve: {
+
+            user: function(
+
+              User,
+
+              baseRole,
+
+              $q,
+
+              alertService,
+
+              $state,
+
+              routerRoleValidationService
+
+            ) {
+
+              return routerRoleValidationService(
+
+                User,
+
+                baseRole,
+
+                $q,
+
+                alertService,
+
+                $state
+
+              );
+
+            }
+
+          }
+
+        }
+
+      },
+
+      data: { pageTitle: "Release Notes", className: "ringed" }
+
+    });
+
+  })
+
+  .controller("ReleaseNotesCtrl", function( $scope, $http, alertService) {
+
+
+
+    $scope.apps = [
+
+      {label: "Admin Panel", id: 0},
+
+      {label: "Neighbor Dashboard", id: 0},
+
+    ];
+
+
+
+    $scope.releaseDateOptions = {
+
+      formatYear: 'yy',
+
+        startingDay: 1
+
+    };
+
+
+
+
+
+    $scope.semanticVersioningRegexp = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
+
+
+
+    /*
+
+    * TODO: fetch release notes
+
+    * TODO: add release note
+
+    * TODO: delete release note
+
+    * TODO: add release note item
+
+    * TODO: remove release note item
+
+    * */
+
+    $scope.errors = {};
+
+
+
+    $scope.init = function () {
+
+      $scope.fetchReleaseNotes();
+
+
+
+    };
+
+
+
+    var findReleaseIndex = function (app, version) {
+
+      return $scope.releases.findIndex(function (release) {
+
+        return release.app === app && release.version === version;
+
+      });
+
+    };
+
+
+
+    var hasAtLeastOneNote = function (release) {
+
+      var result = Boolean(release.notes.find(function (note) {
+
+        return _.get(note, 'description', '').trim() !== '';
+
+      }));
+
+      if (result === false) release.active = false;
+
+      return result;
+
+    };
+
+    $scope.areNotesEmpty = function(release_notes) {
+
+      return Boolean(hasAtLeastOneNote(release_notes)) === false;
+
+    };
+
+
+
+    $scope.activeReleaseNoteToggle = function(release, form, evt) {
+
+      // var scope = angular.element(evt.target).scope();
+
+      // var target = evt.target.nodeName;
+
+      // if (['LABEL', 'INPUT'].includes(target)) {
+
+      // }
+
+      // evt.preventDefault();
+
+      // evt.stopPropagation();
+
+      var emptyNotes = $scope.areNotesEmpty(release);
+
+
+
+      if (form.$valid && !emptyNotes) {
+
+        // release.active = !release.active;
+
+        // evt.target.checked = release.active;
+
+      } else if (emptyNotes) {
+
+        release.active = false;
+
+        // evt.target.checked = false;
+
+      }
+
+    };
+
+
+
+    $scope.deleteChange = function(notes, index) {
+
+      if (notes.length === 1) return;
+
+      var leftArray = notes.slice(0, index);
+
+      var rightArray = notes.slice(index + 1);
+
+      var result = [].concat(leftArray, rightArray)
+
+      notes.length = 0;
+
+      Array.prototype.push.apply(notes, result);
+
+    };
+
+
+
+    var defaultChangeItem = function() {
+
+      return {type: 'INFO', description: ''};
+
+    };
+
+
+
+    $scope.addChange = function (notes, index) {
+
+      var left = index + 1;
+
+      var defaultChange = defaultChangeItem();
+
+      var leftArray = notes.slice(0, left);
+
+      var rightArray = notes.slice(left);
+
+      var result = [].concat(leftArray, [defaultChange], rightArray)
+
+      notes.length = 0;
+
+      Array.prototype.push.apply(notes, result);
+
+    };
+
+
+
+    $scope.addRelease = function () {
+
+      $scope.releases.unshift(
+
+        {
+
+          version: '',
+
+          release_date: null,
+
+          app: "1",
+
+          active: false,
+
+          notes: [
+
+            defaultChangeItem()
+
+          ]
+
+        }
+
+      );
+
+    };
+
+
+
+    var removeReleaseFromReleases = function(index) {
+
+      var leftArray = $scope.releases.slice(0, index);
+
+      var rightArray = $scope.releases.slice(index + 1);
+
+      var result = [].concat(leftArray, rightArray)
+
+      $scope.releases.length = 0;
+
+      Array.prototype.push.apply($scope.releases, result);
+
+    };
+
+
+
+    $scope.deleteRelease = function(release, index) {
+
+      if(release.id) {
+
+        deleteReleaseNote(release, function (id) {
+
+          removeReleaseFromReleases(index);
+
+        });
+
+      } else {
+
+        removeReleaseFromReleases(index);
+
+      }
+
+    };
+
+
+
+    $scope.saveReleaseNotes = function (release) {
+
+      console.info("Release information", release);
+
+      updateReleaseNote(release);
+
+    };
+
+
+
+    $scope.releases = [];
+
+    $scope.ongoingRequest = false;
+
+    $scope.loadingNotes = false;
+
+
+
+    var defaultCallback = function () {
+
+    };
+
+
+
+
+
+    $scope.fetchReleaseNotes = function() {
+
+      $scope.loadingNotes = true;
+
+
+
+      $http.get("/v2/release_notes")
+
+        .then(function (response) {
+
+          var data = _.get(response, "data.release_notes", []);
+
+          $scope.releases = data.map(function (release_note) {
+
+            return incomingNote(release_note);
+
+          });
+
+        })
+
+        .catch(function (error) {
+
+          alertService.showBox("Failed", "Could not load release notes", "error");
+
+        })
+
+        .finally(function () {
+
+          $scope.loadingNotes = false;
+
+        });
+
+    };
+
+
+
+
+
+    var deleteReleaseNote = function(release_notes, callback) {
+
+      $scope.ongoingRequest = true;
+
+
+
+      $http.delete(`/v2/release_notes/${release_notes.id}`)
+
+        .then(function (response) {
+
+          callback(release_notes.id);
+
+          alertService.showBox("Release note deleted! ", "", "success");
+
+        })
+
+        .catch(function (error) {
+
+          alertService.showBox("Failed", "Could not delete release note", "error");
+
+        })
+
+        .finally(function () {
+
+          $scope.ongoingRequest = false;
+
+        });
+
+    };
+
+
+
+    var synchronizeReleaseNote = function (release) {
+
+      var index = findReleaseIndex(release.app, release.version);
+
+      $scope.releases[index] = release;
+
+    };
+
+
+
+    $scope.createReleaseNote = function(release_note, form) {
+
+      if (form.$valid && typeof release_note.id === 'undefined') {
+
+        createReleaseNote(release_note, synchronizeReleaseNote);
+
+      } else {
+
+        // ignore
+
+      }
+
+
+
+    };
+
+
+
+    var createReleaseNote = function(release_note, callback) {
+
+      $scope.ongoingRequest = true;
+
+
+
+      var payload = {release_note: outgoingNote(release_note)};
+
+        $http.post('/v2/release_notes', payload)
+
+        .then(function (response) {
+
+          callback(incomingNote(response.data));
+
+          alertService.showBox("Note Created! ", "", "success");
+
+        })
+
+        .catch(function (error) {
+
+          alertService.showBox("Failed", "Could not save release note", "error");
+
+        })
+
+        .finally(function () {
+
+          $scope.ongoingRequest = false;
+
+        });
+
+    };
+
+
+
+
+
+    var updateReleaseNote = function(release_note) {
+
+      $scope.ongoingRequest = true;
+
+      var id = release_note.id;
+
+      var payload = {release_note: release_note};
+
+      $http.put(`/v2/release_notes/${id}`, payload)
+
+        .then(function (response) {
+
+          synchronizeReleaseNote(incomingNote(response.data));
+
+          alertService.showBox("Note Updated! ", "", "success");
+
+        })
+
+        .catch(function (error) {
+
+          alertService.showBox("Failed", "Could not update note", "error");
+
+        })
+
+        .finally(function () {
+
+          $scope.ongoingRequest = false;
+
+        });
+
+    };
+
+
+
+    var outgoingNote = function (release_note) {
+
+      var note = _.cloneDeep(release_note);
+
+      note.release_date = release_note.release_date.toUTCString();
+
+      return note;
+
+    };
+
+
+
+    var incomingNote = function (release_note) {
+
+      var note = _.cloneDeep(release_note);
+
+      note.release_date = new Date(release_note.release_date);
+
+      _.get(note, 'notes', []).forEach(function (note) {
+
+        note.type = note.type.toUpperCase();
+
+      });
+
+      return note;
+
+    };
+
+
+
+
+
+  });
+
